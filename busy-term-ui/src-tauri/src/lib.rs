@@ -57,6 +57,8 @@ fn spawn_icon_updater(app: tauri::AppHandle) {
             if shown != Some(busy) {
                 if let Some(tray) = app.tray_by_id("main-tray") {
                     let _ = tray.set_icon(Some(icon::image(busy)));
+                    // set_icon 会重置 template 标志，不重设的话图标会变黑，不再随菜单栏明暗上白色。
+                    let _ = tray.set_icon_as_template(true);
                 }
                 shown = Some(busy);
             }
