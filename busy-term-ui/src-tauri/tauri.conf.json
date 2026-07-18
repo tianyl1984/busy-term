@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "busy-term-ui",
+  "productName": "BusyTerm",
   "version": "0.1.0",
   "identifier": "com.tianyl1984.busy-term",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "busy-term 设置",
+        "title": "BusyTerm 设置",
         "width": 380,
         "height": 560,
         "resizable": false,

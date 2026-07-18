@@ -118,14 +118,14 @@ pub fn run() {
             events::spawn_reader(app.handle().clone());
 
             let settings_item = MenuItem::with_id(app, "settings", "设置…", true, None::<&str>)?;
-            let quit_item = MenuItem::with_id(app, "quit", "退出 busy-term", true, None::<&str>)?;
+            let quit_item = MenuItem::with_id(app, "quit", "退出 BusyTerm", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&settings_item, &quit_item])?;
 
             TrayIconBuilder::with_id("main-tray")
                 .icon(icon::image(false))
                 // 单色 template 图：随菜单栏明暗自动黑/白。想按 PNG 原色显示改回 false。
                 .icon_as_template(true)
-                .tooltip("busy-term")
+                .tooltip("BusyTerm")
                 .menu(&menu)
                 // 左键归 popover，右键才出菜单。
                 .show_menu_on_left_click(false)

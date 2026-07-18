@@ -64,7 +64,7 @@ onUnmounted(() => {
 <template>
   <div class="popover" :key="showCount">
     <header>
-      <span class="title">busy-term</span>
+      <span class="title">BusyTerm</span>
       <span
         class="dot"
         :class="{ on: serving, warn: status.state === 'external' }"
