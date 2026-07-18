@@ -44,25 +44,88 @@ fn position_popover(window: &tauri::WebviewWindow, rect: tauri::Rect) {
     let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
 }
 
-/// 按「当前有没有在显示的命令」切菜单栏图标。
+/// 菜单栏图标的三种状态。空闲态再按 socket 连通性分「已连接 / 离线」。
+#[derive(Clone, Copy, PartialEq)]
+enum IconState {
+    /// 有命令在跑：块光标上下摆动的动画。
+    Busy,
+    /// 空闲，且 daemon socket 连得上。
+    Idle,
+    /// 空闲，且 daemon 未启动 / 连不上。
+    Offline,
+}
+
+/// 具体要贴的那一张图（忙态还带帧号）。用它把「贴哪张」的决定从后台线程
+/// 传进主线程闭包里再解码，避免把 `Image` 跨线程搬运。
+#[derive(Clone, Copy)]
+enum IconFrame {
+    Busy(usize),
+    Idle,
+    Offline,
+}
+
+/// 每秒刷新一次菜单栏图标。
 ///
-/// 必须轮询而不是只在收到事件时更新：命令跨过 3 秒门槛这件事本身不产生任何事件，
-/// 一条命令是「跑着跑着」才变成该显示的。
+/// 必须轮询而不是只在收到事件时更新：一是命令跨过 3 秒门槛这件事本身不产生任何事件，
+/// 一条命令是「跑着跑着」才变成该显示的；二是忙状态的光标动画本来就要按固定节拍走帧。
+/// 空闲/离线态图标不变时不重贴，只有忙态每秒换一帧做「上下摆」动画。
 fn spawn_icon_updater(app: tauri::AppHandle) {
     std::thread::spawn(move || {
-        let mut shown: Option<bool> = None;
+        let mut shown: Option<IconState> = None;
+        let mut frame = 0usize;
         loop {
-            let busy = !events::visible_commands(&app.state::<CommandTracker>(), &app.state::<Whitelist>())
-                .is_empty();
-            if shown != Some(busy) {
-                if let Some(tray) = app.tray_by_id("main-tray") {
-                    let _ = tray.set_icon(Some(icon::image(busy)));
-                    // set_icon 会重置 template 标志，不重设的话图标会变黑，不再随菜单栏明暗上白色。
-                    let _ = tray.set_icon_as_template(true);
+            let busy = !events::visible_commands(
+                &app.state::<CommandTracker>(),
+                &app.state::<Whitelist>(),
+            )
+            .is_empty();
+            let state = if busy {
+                IconState::Busy
+            } else if app.state::<CommandTracker>().connected() {
+                IconState::Idle
+            } else {
+                IconState::Offline
+            };
+
+            // 决定这一轮要贴哪张图：忙态每帧都换（动画）；空闲/离线态只在切换时贴一次。
+            let which = match state {
+                IconState::Busy => {
+                    let f = frame;
+                    frame = (frame + 1) % icon::BUSY_FRAME_COUNT;
+                    Some(IconFrame::Busy(f))
                 }
-                shown = Some(busy);
+                IconState::Idle if shown != Some(state) => {
+                    frame = 0;
+                    Some(IconFrame::Idle)
+                }
+                IconState::Offline if shown != Some(state) => {
+                    frame = 0;
+                    Some(IconFrame::Offline)
+                }
+                _ => None,
+            };
+            shown = Some(state);
+
+            if let Some(which) = which {
+                let handle = app.clone();
+                // set_icon 与 set_icon_as_template 必须在同一个主线程闭包里连着做完：
+                // 分两次从后台线程分派到主线程的话，中间会先画出一帧「非 template」的黑图，
+                // 整个图标（包括左边的 >）就会每秒闪一下。合成一次主线程操作即可消除闪动。
+                let _ = app.run_on_main_thread(move || {
+                    if let Some(tray) = handle.tray_by_id("main-tray") {
+                        let image = match which {
+                            IconFrame::Busy(f) => icon::busy(f),
+                            IconFrame::Idle => icon::idle(),
+                            IconFrame::Offline => icon::offline(),
+                        };
+                        let _ = tray.set_icon(Some(image));
+                        // set_icon 会重置 template 标志，不重设图标会变黑、不再随菜单栏明暗上白色。
+                        let _ = tray.set_icon_as_template(true);
+                    }
+                });
             }
-            std::thread::sleep(Duration::from_millis(500));
+            // 换帧节拍 = 图标「每秒换一个位置」，也决定忙/闲切换的最大延迟。
+            std::thread::sleep(Duration::from_secs(1));
         }
     });
 }
@@ -124,7 +187,8 @@ pub fn run() {
             let menu = Menu::with_items(app, &[&settings_item, &quit_item])?;
 
             TrayIconBuilder::with_id("main-tray")
-                .icon(icon::image(false))
+                // 启动瞬间还没连上 daemon，先按离线态显示，连上后 updater 会改。
+                .icon(icon::offline())
                 // 单色 template 图：随菜单栏明暗自动黑/白。想按 PNG 原色显示改回 false。
                 .icon_as_template(true)
                 .tooltip("BusyTerm")
