@@ -30,6 +30,24 @@ function elapsed(startedAt) {
   return `${Math.floor(mins / 60)}h ${mins % 60}m`;
 }
 
+// 和 config.rs 的 program_name 保持一致：取第一个词、去掉路径。只用于按钮提示文案，
+// 真正入库的归一化在 Rust 那边做。
+function programName(command) {
+  const first = command.trim().split(/\s+/)[0] ?? "";
+  return first.split("/").pop() || first;
+}
+
+// 后端 whitelist_add 会自己收敛成程序名，所以整条命令直接传过去即可。
+async function hide(command) {
+  try {
+    await invoke("whitelist_add", { program: command });
+    // 立刻刷新，别等下一次轮询才让它消失。
+    await refresh();
+  } catch (err) {
+    console.error("加入白名单失败", err);
+  }
+}
+
 const STATE_TEXT = {
   running: "没有正在执行的命令",
   external: "没有正在执行的命令",
@@ -78,6 +96,13 @@ onUnmounted(() => {
         <li v-for="cmd in commands" :key="cmd.session_id">
           <span class="cmd" :title="cmd.command">{{ cmd.command }}</span>
           <span class="time">{{ elapsed(cmd.started_at) }}</span>
+          <button
+            class="hide"
+            :title="`不再显示 ${programName(cmd.command)}`"
+            @click="hide(cmd.command)"
+          >
+            ⊘
+          </button>
         </li>
       </ul>
       <p v-else class="empty">{{ emptyHint }}</p>
@@ -208,6 +233,30 @@ main {
   flex: none;
 }
 
+/* 平时藏起来，鼠标移到那一行才露出来——列表本身保持干净。
+   用 opacity 而不是 display，位置就不会在 hover 时跳。 */
+.hide {
+  border: none;
+  background: none;
+  padding: 0 2px;
+  line-height: 1;
+  font-size: 13px;
+  color: #86868b;
+  cursor: pointer;
+  flex: none;
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+
+.list li:hover .hide,
+.hide:focus-visible {
+  opacity: 1;
+}
+
+.hide:hover {
+  color: #1d1d1f;
+}
+
 .empty {
   color: #86868b;
   font-size: 13px;
@@ -256,7 +305,8 @@ footer {
     color: #98989d;
   }
 
-  .icon:hover {
+  .icon:hover,
+  .hide:hover {
     color: #f5f5f7;
   }
 

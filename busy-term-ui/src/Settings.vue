@@ -32,7 +32,11 @@ const serving = computed(() =>
 const external = computed(() => status.value.state === "external");
 
 async function refresh() {
-  status.value = await invoke("daemon_status");
+  // 白名单也一起拉：popover 上的隐藏按钮会在设置窗开着的时候改它。
+  [status.value, whitelist.value] = await Promise.all([
+    invoke("daemon_status"),
+    invoke("whitelist_get"),
+  ]);
 }
 
 async function run(command) {
@@ -82,7 +86,6 @@ async function removeEntry(program) {
 
 onMounted(async () => {
   autostart.value = await isAutostartEnabled();
-  whitelist.value = await invoke("whitelist_get");
   await refresh();
   // daemon 可能自己崩掉，轮询让面板不至于停在陈旧状态上。
   timer = setInterval(refresh, 2000);

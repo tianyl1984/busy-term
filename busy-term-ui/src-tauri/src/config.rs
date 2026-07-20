@@ -47,7 +47,9 @@ impl Whitelist {
     }
 
     pub fn add(&self, program: String) -> Result<Vec<String>, String> {
-        let program = program.trim().to_string();
+        // 存归一化后的程序名：用户手输 `./dev.sh`，hides() 那边算出来的是 `dev.sh`，
+        // 不在这里对齐就永远匹配不上。
+        let program = program_name(program.trim()).to_string();
         if program.is_empty() {
             return Err("白名单项不能为空".into());
         }
@@ -71,7 +73,12 @@ impl Whitelist {
     /// 这条命令要不要藏起来。
     pub fn hides(&self, command: &str) -> bool {
         let program = program_name(command);
-        self.entries.lock().unwrap().iter().any(|e| e == program)
+        // entry 也过一遍：老配置文件里可能存着未归一化的 `./dev.sh`。
+        self.entries
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|e| program_name(e) == program)
     }
 }
 
@@ -103,6 +110,21 @@ mod tests {
 
         list.remove("npm").unwrap();
         assert!(!list.hides("npm run build"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn add_normalizes_path_prefixed_input() {
+        let dir = std::env::temp_dir().join(format!("busy-term-test-norm-{}", std::process::id()));
+        let list = Whitelist::load(dir.join("whitelist.json"));
+
+        // 用户在设置里手输带路径的写法，也要能挡住。
+        list.add("./dev.sh".into()).unwrap();
+        assert_eq!(list.list(), vec!["dev.sh".to_string()]);
+        assert!(list.hides("./dev.sh"));
+        assert!(list.hides("dev.sh --port 3000"));
+        assert!(list.hides("/Users/me/proj/dev.sh"));
+
         let _ = fs::remove_dir_all(&dir);
     }
 }
