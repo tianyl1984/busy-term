@@ -109,6 +109,31 @@ async def monitor_session(connection, broker, session_id):
         pass
 
 
+async def monitor_session_terminations(connection, broker):
+    """监听会话结束，为结束的会话补发一条 command_end。
+
+    像 `exit` 这样直接结束 shell 的命令，会话在下一个 prompt 出现之前就没了。
+    而 iTerm2 Shell Integration 的 COMMAND_END 是挂在「下一个 prompt」上报的——
+    prompt 不会再来，COMMAND_END 也就永远不会触发。结果这条命令在客户端里会
+    一直停在「正在执行」。这里靠会话结束事件兜底，替它补一条 command_end。
+
+    对没有在跑命令的会话补发也无所谓：客户端按 session_id 删除，本来就没有对应
+    项时是空操作。
+    """
+    async with iterm2.SessionTerminationMonitor(connection) as mon:
+        while True:
+            session_id = await mon.async_get()
+            print(f"[SESSION END]   session={session_id}")
+            broker.broadcast(
+                {
+                    "type": "command_end",
+                    "session_id": session_id,
+                    "status": None,
+                    "ts": time.time(),
+                }
+            )
+
+
 async def start_socket_server(broker):
     """在 SOCKET_PATH 上开 unix socket 服务端。"""
     global _own_socket
@@ -136,6 +161,9 @@ async def main(connection):
         await monitor_session(connection, broker, session_id)
 
     print(f"busy-term daemon 已启动，正在监听命令事件……socket: {SOCKET_PATH}")
+    # 会话结束监听要独立跑：async_foreach_session_create_task 会一直阻塞在这里，
+    # 所以先把它挂成后台任务再进去。
+    asyncio.create_task(monitor_session_terminations(connection, broker))
     await iterm2.EachSessionOnceMonitor.async_foreach_session_create_task(app, task)
 
 
