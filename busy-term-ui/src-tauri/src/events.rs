@@ -66,6 +66,13 @@ impl CommandTracker {
                     .and_then(|v| v.as_str())
                     .unwrap_or_default()
                     .to_string();
+                // Cmd+K 清屏会让 iTerm2 重走一遍 prompt 状态机，补发一条命令文本为空的
+                // command_start。这条命令根本不存在，shell 不会再给它配套的 command_end，
+                // 留在表里就是一条永远结束不了的空命令。当成「这个会话现在没有前台命令」处理。
+                if command.trim().is_empty() {
+                    inner.running.remove(session_id);
+                    return;
+                }
                 let started_at = event.get("ts").and_then(|v| v.as_f64()).unwrap_or_default();
                 inner.running.insert(
                     session_id.to_string(),
@@ -96,6 +103,25 @@ impl CommandTracker {
         // 跑得最久的排前面——面板是用来看「什么卡住了」的。
         commands.sort_by(|a, b| a.started_at.total_cmp(&b.started_at));
         commands
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_command_start_does_not_linger() {
+        let tracker = CommandTracker::default();
+        tracker.apply(r#"{"type":"command_start","session_id":"s1","command":"sleep 100","ts":1.0}"#);
+        assert_eq!(tracker.commands().len(), 1);
+
+        // Cmd+K 清屏补发的空 command_start：既不该新增一条，也该把残留的清掉。
+        tracker.apply(r#"{"type":"command_start","session_id":"s1","command":"","ts":2.0}"#);
+        assert!(tracker.commands().is_empty());
+
+        tracker.apply(r#"{"type":"command_start","session_id":"s2","command":"   ","ts":3.0}"#);
+        assert!(tracker.commands().is_empty());
     }
 }
 
